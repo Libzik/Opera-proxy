@@ -1,6 +1,7 @@
 #!/bin/sh
 # ================================================================
 #  opera-proxy installer for Keenetic / Entware
+#  Режим: SOCKS5 (-socks-mode)
 #  Параметры вынесены в /opt/etc/operaproxy.conf
 # ================================================================
 
@@ -58,29 +59,26 @@ ok "Установлен: $(command -v opera-proxy)"
 # ── 5. Конфиг-файл ────────────────────────────────────────────
 info "Создаём конфиг $CONF_FILE..."
 
-# Если конфиг уже есть — не перезаписываем, только показываем
 if [ -f "$CONF_FILE" ]; then
-  warn "Конфиг уже существует — оставляем как есть"
-  warn "Текущие настройки:"
+  warn "Конфиг уже существует — оставляем как есть:"
   cat "$CONF_FILE"
 else
   cat > "$CONF_FILE" << 'EOF'
-# ─────────────────────────────────────────
+# ─────────────────────────────────────────────────────
 #  Конфиг opera-proxy
-#  Редактируй этот файл, затем:
-#  /opt/etc/init.d/S99opera-proxy restart
-# ─────────────────────────────────────────
+#  После изменений: /opt/etc/init.d/S99opera-proxy restart
+# ─────────────────────────────────────────────────────
 
 # Регион: EU | AS | AM
 COUNTRY="EU"
 
-# Адрес прослушивания
-# 127.0.0.1 — только роутер
+# Адрес прослушивания:
+# 127.0.0.1 — только роутер (для интерфейса Proxy0)
 # 0.0.0.0   — роутер + все устройства в LAN
 BIND_ADDR="127.0.0.1"
 
-# Порт
-BIND_PORT="18080"
+# Порт SOCKS5
+BIND_PORT="1080"
 
 # Уровень логов: 10=debug 20=info 30=warn 40=error
 VERBOSITY="20"
@@ -97,10 +95,10 @@ cat > "$INIT_SCRIPT" << 'INITEOF'
 
 ENABLED=yes
 PROCS=opera-proxy
-ARGS="-country ${COUNTRY:-EU} -bind-address ${BIND_ADDR:-127.0.0.1}:${BIND_PORT:-18080} -verbosity ${VERBOSITY:-20}"
+ARGS="-socks-mode -country ${COUNTRY:-EU} -bind-address ${BIND_ADDR:-127.0.0.1}:${BIND_PORT:-1080} -verbosity ${VERBOSITY:-40}"
 PRECMD=
 POSTCMD=
-DESC="Opera Proxy"
+DESC="Opera Proxy SOCKS5"
 PATH=/opt/sbin:/opt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 . /opt/etc/init.d/rc.func
@@ -133,26 +131,25 @@ fi
 [ -x /opt/etc/init.d/S98crond ] && \
   /opt/etc/init.d/S98crond restart > /dev/null 2>&1 && ok "crond перезапущен"
 
-# ── 9. Интерфейс Proxy0 в Keenetic OS ────────────────────────
-info "Создаём интерфейс $IFACE в Keenetic OS..."
-
-# Читаем конфиг ещё раз для актуальных значений
+# ── 9. Интерфейс Proxy0 в Keenetic OS (SOCKS5) ───────────────
+info "Создаём SOCKS5-интерфейс $IFACE в Keenetic OS..."
 [ -f "$CONF_FILE" ] && . "$CONF_FILE"
 BIND_ADDR="${BIND_ADDR:-127.0.0.1}"
-BIND_PORT="${BIND_PORT:-18080}"
+BIND_PORT="${BIND_PORT:-1080}"
 
 if ! command -v ndmc > /dev/null 2>&1; then
   warn "ndmc не найден — настрой вручную:"
-  warn "  Протокол: HTTP | Адрес: $BIND_ADDR | Порт: $BIND_PORT"
+  warn "  Протокол: SOCKS5 | Адрес: $BIND_ADDR | Порт: $BIND_PORT"
 else
   ndmc -c "interface $IFACE"
-  ndmc -c "interface $IFACE proxy protocol http"
+  ndmc -c "interface $IFACE proxy protocol socks5"
+  ndmc -c "interface $IFACE proxy socks5-udp"
   ndmc -c "interface $IFACE proxy upstream $BIND_ADDR $BIND_PORT"
   ndmc -c "interface $IFACE description opera-proxy"
   ndmc -c "interface $IFACE ip global auto"
   ndmc -c "interface $IFACE up"
   ndmc -c "system configuration save"
-  ok "Интерфейс $IFACE создан и поднят"
+  ok "Интерфейс $IFACE создан (SOCKS5)"
 fi
 
 # ── 10. Проверка ──────────────────────────────────────────────
@@ -160,7 +157,7 @@ info "Проверяем прокси..."
 sleep 2
 REAL_IP=$(curl -fsSL --max-time 10 https://ifconfig.me 2>/dev/null || echo "н/д")
 PROXY_IP=$(curl -fsSL --max-time 10 \
-  -x "http://${BIND_ADDR}:${BIND_PORT}" \
+  --socks5 "${BIND_ADDR}:${BIND_PORT}" \
   https://ifconfig.me 2>/dev/null || echo "н/д")
 
 echo ""
@@ -171,13 +168,17 @@ printf "\n"
 printf "  Прямой IP:       %s\n" "$REAL_IP"
 printf "  IP через прокси: %s\n" "$PROXY_IP"
 printf "\n"
-printf "  Конфиг:   %s\n" "$CONF_FILE"
-printf "  Регион:   %s\n" "${COUNTRY:-EU}"
-printf "  Прокси:   http://%s:%s\n" "$BIND_ADDR" "$BIND_PORT"
+printf "  Конфиг:    %s\n" "$CONF_FILE"
+printf "  Режим:     SOCKS5\n"
+printf "  Регион:    %s\n" "${COUNTRY:-EU}"
+printf "  Прокси:    socks5://%s:%s\n" "$BIND_ADDR" "$BIND_PORT"
 printf "\n"
 printf "  Поменять настройки:\n"
 printf "    vi %s\n" "$CONF_FILE"
 printf "    %s restart\n" "$INIT_SCRIPT"
+printf "\n"
+printf "  Проверка вручную:\n"
+printf "    curl --socks5 %s:%s https://ifconfig.me\n" "$BIND_ADDR" "$BIND_PORT"
 printf "\n"
 printf "  Логи:\n"
 printf "    logread | grep -i opera\n"

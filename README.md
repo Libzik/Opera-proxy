@@ -12,7 +12,7 @@
 ## ⚡ Установка
 
 ```
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/DmitryTolmachev/Opera-proxy/refs/heads/main/install.sh)"
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/Libzik/Opera-proxy/refs/heads/main/install.sh)"
 
 ```
 
